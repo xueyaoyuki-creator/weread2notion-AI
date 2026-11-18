@@ -1,3 +1,5 @@
+import pytest
+
 from weread2notion.weread import WeReadClient
 from weread2notion.weread import WeReadError
 
@@ -31,7 +33,38 @@ def test_shelf_request_reports_current_skill_version():
     client.shelf()
 
     assert session.payloads[0]["api_name"] == "/shelf/sync"
-    assert session.payloads[0]["skill_version"] == "1.0.5"
+    assert session.payloads[0]["skill_version"] == "1.0.6"
+
+
+@pytest.mark.parametrize("status", [{"errcode": 0}, {}])
+def test_upgrade_notice_preserves_shelf_data_without_retry(status, caplog):
+    data = {
+        **status,
+        "books": [{"bookId": "book-1", "title": "test book"}],
+        "upgrade_info": {"message": "本次请求已正常处理，后续可升级"},
+    }
+    session = Session([data, data])
+    client = WeReadClient("test-key", session=session)
+
+    assert client.shelf() == data
+    assert len(session.payloads) == 1
+    assert client.shelf() == data
+    assert len(session.payloads) == 2
+    assert len(caplog.records) == 1
+    assert "升级" in caplog.text
+
+
+def test_upgrade_notice_does_not_hide_api_error():
+    session = Session([{
+        "errcode": -1,
+        "errmsg": "invalid API key",
+        "upgrade_info": {"message": "new version"},
+    }])
+    client = WeReadClient("test-key", session=session)
+
+    with pytest.raises(WeReadError, match="errcode=-1: invalid API key"):
+        client.shelf()
+    assert len(session.payloads) == 1
 
 
 def test_notebook_pagination_is_flat_and_uses_last_sort():

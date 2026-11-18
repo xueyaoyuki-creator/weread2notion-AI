@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime
 from typing import Any
@@ -8,6 +9,7 @@ import requests
 
 
 GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway"
+logger = logging.getLogger(__name__)
 
 
 class WeReadError(RuntimeError):
@@ -15,8 +17,9 @@ class WeReadError(RuntimeError):
 
 
 class WeReadClient:
-    def __init__(self, api_key: str, skill_version: str = "1.0.5", session=None):
+    def __init__(self, api_key: str, skill_version: str = "1.0.6", session=None):
         self.skill_version = skill_version
+        self._upgrade_notified = False
         self.session = session or requests.Session()
         self.session.headers.update(
             {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
@@ -30,15 +33,15 @@ class WeReadClient:
                 response = self.session.post(GATEWAY_URL, json=payload, timeout=45)
                 response.raise_for_status()
                 data = response.json()
-                if data.get("upgrade_info"):
-                    message = (
-                        data["upgrade_info"].get("message") or data["upgrade_info"]
-                    )
-                    raise WeReadError(f"微信读书技能需要升级：{message}")
                 if data.get("errcode", 0) != 0:
                     raise WeReadError(
                         f"{api_name} 返回 errcode={data.get('errcode')}: {data.get('errmsg', '')}"
                     )
+                # Upgrade notices accompany valid business data. Consume this
+                # response once; do not retry or download code automatically.
+                if data.get("upgrade_info") and not self._upgrade_notified:
+                    logger.warning("微信读书有可用升级；本次请求成功，继续同步。")
+                    self._upgrade_notified = True
                 return data
             except WeReadError:
                 raise
